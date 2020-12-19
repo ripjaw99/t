@@ -11,6 +11,10 @@ import random
 import datetime
 from datetime import date
 from datetime import timedelta
+from PIL import Image
+from PIL import ImageFont
+from PIL import ImageDraw
+img = img.open('BOT.png')
 
 
 
@@ -124,7 +128,7 @@ async def on_raw_reaction_remove(payload):
 @bot.command()
 async def help(ctx):
     embed = discord.Embed(colour=discord.Colour.green())
-    thumb = discord.File("/home/admin/mystuff/BOT.png", filename="BOT.png")
+    thumb = discord.File("/home/pi/Downloads/BOT.png", filename="BOT.png")
     embed.set_thumbnail(url="attachment://BOT.png")
     embed.set_author(name='List of commands available')
     embed.add_field(name='help:', value='Shows this command', inline=False)
@@ -497,7 +501,7 @@ async def vip(ctx, *arg):
         await advchannel.send(embed=em)
         await advchannel.send(shat.content)
         list = []
-        timeout_date = datetime.datetime.now() + timedelta(minutes=1)
+        timeout_date = datetime.datetime.now() + timedelta(days=7)
         while True:
             invite = await bot.fetch_invite(shat.content)
             guildid = invite.guild.id
@@ -872,13 +876,9 @@ async def unmute(ctx, member: typing.Optional[discord.Member]):
 @bot.event
 async def on_member_join(member):
     channel = member.guild.get_channel(769299912759705640)
+    await channel.send(f'Please welcome {member.mention} to SBL!')
     role = member.guild.get_role(748087697930846268)
     await member.add_roles(role)
-    embed = discord.Embed(colour=discord.Colour.blue(), timestamp=datetime.datetime.now())
-    embed.set_author(name='Member Joined')
-    embed.add_field(name='Please Welcome:', value=f'{member.mention}({member.name}#{member.discriminator}')
-    embed.set_thumbnail(url=member.avatar_url)
-    await channel.send(embed=embed)
     await member.send('Welcome to SBL, check out our rules, info and announcements channels to stay updated with the server!')
     
     

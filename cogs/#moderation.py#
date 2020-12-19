@@ -1,3 +1,5 @@
+import asyncio
+import aiomysql
 import discord
 from discord.ext import commands
 from discord.ext.commands import has_permissions, MissingPermissions
@@ -67,21 +69,12 @@ class Moderation(commands.Cog):
                 result_str = ''.join(random.choice(letters) for i in range(length))
                 return result_str
             
-
-            
-            db = sqlite3.connect('warns.sqlite')
-            cursor = db.cursor()
-          
-        
-            
-            
-            sql = ("INSERT INTO warns(user_id, warn_reason, guild_id, case_id, case_date) VALUES(?,?,?,?,?)")
-            val = (member.id, reason, ctx.guild.id, get_random_string(5), str(datetime.datetime.utcnow()))
-            
-            cursor.execute(sql, val)
-            db.commit()
-            cursor.close()
-            db.close()
+            async with bot.pool.acquire() as connection:
+            #create a transaction for that connection
+                async with connection.transaction():
+                    sql = ("INSERT INTO warns(user_id, warn_reason, guild_id, case_id, case_date, warner_id) VALUES ($1s,$2,$3,$4,$5,$6)")
+                    val = (member.id, reason, ctx.guild.id, get_random_string(5), str(datetime.datetime.utcnow()), ctx.author.id)
+                    await bot.pool.execute(sql, val)
             await ctx.send(f"Warned {member.mention} for {reason}.")
             await member.send(f"You were warned in {ctx.guild.name} for {reason}.")
 
@@ -89,20 +82,25 @@ class Moderation(commands.Cog):
     
     @commands.command()
     async def search(self, ctx, member: typing.Optional[discord.Member]):
-        db = sqlite3.connect('warns.sqlite')
-        cursor = db.cursor()
-        cursor.execute('SELECT case_id FROM warns where user_id = ? and guild_id = ?', (member.id, ctx.guild.id,))
-        casenum = cursor.fetchall()
+        conn = await aiomysql.connect(port=3306,
+                                       user='ripjaw99', password='kris1213A', db='warns',
+                                       )
+        cur = await conn.cursor()
+        await cur.execute('SELECT case_id FROM warns where user_id = %s and guild_id = %s', (member.id, ctx.guild.id,))
+        casenum = await cur.fetchall()
         embed = discord.Embed(colour = discord.Colour.blue(), timestamp=datetime.datetime.utcnow())
         embed.set_author(name=f'Warn history for {member.mention}:')
         
         
         for case in casenum:
-            cursor.execute('SELECT case_date FROM warns where user_id = ? and guild_id = ? and case_id = ?',(member.id, ctx.guild.id, case[0]))
-            date = cursor.fetchone()
-            cursor.execute('SELECT warn_reason FROM warns where user_id = ? and guild_id = ? and case_id = ? and case_date = ?', (member.id, ctx.guild.id, case[0], date[0]))
-            result = cursor.fetchone()
-            embed.add_field(name='Warn', value=f'**Reason:** {result[0]}\n **Case ID:** {case[0]}\n **Date:** {date[0]}', inline = False)
+            await cur.execute('SELECT case_date FROM warns where user_id = %s and guild_id = %s and case_id = %s',(member.id, ctx.guild.id, case[0]))
+            date = await cur.fetchone()
+            await cur.execute('SELECT warn_reason FROM warns where user_id = %s and guild_id = %s and case_id = %s and case_date = %s', (member.id, ctx.guild.id, case[0], date[0]))
+            result = await cur.fetchone()
+            await cur.execute('SELECT warner_id FROM warns where user_id = %s and guild_id = %s and case_id = %s and case_date = %s and warn_reason = %s', (member.id, ctx.guild.id, case[0], date[0], result[0]))
+            warner = await cur.fetchone()
+            warner = await self.bot.fetch_user(warner[0])
+            embed.add_field(name='Warn', value=f'**Reason:** {result[0]}\n **Case ID:** {case[0]}\n **Date:** {date[0]}\n **Warner:** {warner.mention}', inline = False)
             
         await ctx.send(embed=embed)
         
@@ -110,13 +108,16 @@ class Moderation(commands.Cog):
  
     
     @commands.command()
+    @commands.has_permissions(kick_members=True)
     async def removewarn(self, ctx, case_id):
-        db = sqlite3.connect('warns.sqlite')
-        cursor = db.cursor()
-        cursor.execute('DELETE FROM warns where case_id = ? and guild_id = ?', (case_id, ctx.guild.id,))
-        db.commit()
-        cursor.close()
-        db.close()
+        conn = await aiomysql.connect(port=3306,
+                                       user='ripjaw99', password='kris1213A', db='warns',
+                                       )
+        cur = await conn.cursor()
+        await cur.execute('DELETE FROM warns where case_id = %s and guild_id = %s', (case_id, ctx.guild.id,))
+        await conn.commit()
+        await cur.close()
+        conn.close()
         await ctx.send(f'Removed the warn from the user.')
             
  
@@ -303,15 +304,18 @@ class Moderation(commands.Cog):
     @commands.Cog.listener()
     async def on_command(self, ctx):
         db = sqlite3.connect('channelids.sqlite')
-        cursor.db.cursor()
+        cursor = db.cursor()
         cursor.execute('SELECT channel_id FROM channels WHERE guild_id = ?', (ctx.guild.id,))
         result = cursor.fetchone()
-        channel = self.bot.get_channel(id=int(result[0]))
-        embed = discord.Embed(timestamp=discord.Timestamp(datetime.datetime.utcnow()))
-        embed.set_author(name=f'{ctx.command.name} log')
-        embed.add_field(name='Author:', value=ctx.author.mention)
-        embed.set_footer(text='Command invoked at:')
-        await channel.send(embed=embed)
+        if result == None:
+            return
+        else:
+            channel = self.bot.get_channel(id=int(result[0]))
+            embed = discord.Embed(timestamp=datetime.datetime.utcnow())
+            embed.set_author(name=f'{ctx.command.name} log')
+            embed.add_field(name='Author:', value=ctx.author.mention)
+            embed.set_footer(text='Command invoked at:')
+            await channel.send(embed=embed)
     
     
     @commands.Cog.listener()
@@ -320,13 +324,16 @@ class Moderation(commands.Cog):
         cursor = db.cursor()
         cursor.execute(f'SELECT channel_id FROM channels WHERE guild_id = {message.guild.id}')
         result = cursor.fetchone()
-        channel = self.bot.get_channel(id=int(result[0]))
-        embed = discord.Embed()
-        embed.set_author(name='Message Deleted')
-        embed.add_field(name="Content:", value=message.content)
-        embed.add_field(name="Author:", value=message.author)
-        embed.add_field(name="Timestamp in UTC:", value=message.created_at)
-        await channel.send(embed=embed)
+        if result == None:
+            return
+        else:
+            channel = self.bot.get_channel(id=int(result[0]))
+            embed = discord.Embed()
+            embed.set_author(name='Message Deleted')
+            embed.add_field(name="Content:", value=message.content)
+            embed.add_field(name="Author:", value=message.author)
+            embed.add_field(name="Timestamp in UTC:", value=message.created_at)
+            await channel.send(embed=embed)
     
     @commands.Cog.listener()
     async def on_message_edit(self, before, after):
@@ -335,14 +342,17 @@ class Moderation(commands.Cog):
             cursor = db.cursor()
             cursor.execute(f'SELECT channel_id FROM channels WHERE guild_id = {before.guild.id}')
             result = cursor.fetchone()
-            channel = self.bot.get_channel(id=int(result[0]))
-            embed = discord.Embed()
-            embed.set_author(name='Message Edited')
-            embed.add_field(name="Old Message:", value=before.content)
-            embed.add_field(name="New Message:", value=after.content)
-            embed.add_field(name="Author:", value=before.author)
-            embed.add_field(name="Timestamp in UTC:", value=before.created_at)
-            await channel.send(embed=embed)
+            if result == None:
+                return
+            else:
+                channel = self.bot.get_channel(id=int(result[0]))
+                embed = discord.Embed()
+                embed.set_author(name='Message Edited')
+                embed.add_field(name="Old Message:", value=before.content)
+                embed.add_field(name="New Message:", value=after.content)
+                embed.add_field(name="Author:", value=before.author)
+                embed.add_field(name="Timestamp in UTC:", value=before.created_at)
+                await channel.send(embed=embed)
         except TypeError:
             randomvariabletodonothing = 0
             
@@ -362,42 +372,6 @@ class Moderation(commands.Cog):
         message = await ctx.send(embed=em)
         await message.add_reaction('\U0001f44d')
         await message.add_reaction('\U0001f44e')
-        timeout_date = datetime.datetime.now() + timedelta(seconds=90)
-        def check(reaction, user):
-            return reaction.message == message
-        while True:
-            timeout = timeout_date - datetime.datetime.now()
-            timeout = timeout.total_seconds()
-            message = await ctx.fetch_message(message.id)
-            member = ctx.guild.get_member(713979128969429012)
-            thebot = ctx.guild.get_member(ctx.guild.me)
-            thedumbass = ctx.guild.get_member(625026392853315584)
-            reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=timeout)
-            if user == member:
-                if str(reaction.emoji) == '\U0001f44d':
-                    memesrandom_sub.upvote()
-                    await ctx.send(f'{user.mention}, I upvoted the post!')
-                elif str(reaction.emoji) == '\U0001f44e':
-                    memesrandom_sub.downvote()
-                    await ctx.send(f'{user.mention}, I downvoted the post.')
-                else:
-                    ranovarhfsbfsadjm = 0
-            elif user == thebot:
-                bruh = 193918
-            
-            elif user == thedumbass:
-                t_end = time.time() + 60 
-                while time.time() < t_end:
-                    await user.send("We are sorry, you don't have permission to use the bot anymore.")
-                    await message.remove_reaction(reaction, user)
-                    
-            else:
-                await ctx.send(f"{user.mention}, I'm sorry you cannot react as you are not the bot owner.")
-                await message.remove_reaction(reaction, user)
-           
-                
-            
-
         
         
     @commands.command()
@@ -412,48 +386,12 @@ class Moderation(commands.Cog):
         message = await ctx.send(embed=em)
         await message.add_reaction('\U0001f44d')
         await message.add_reaction('\U0001f44e')
-        timeout_date = datetime.datetime.now() + timedelta(seconds=90)
-        def check(reaction, user):
-            return reaction.message == message
-        while True:
-            timeout = timeout_date - datetime.datetime.now()
-            timeout = timeout.total_seconds()
-            message = await ctx.fetch_message(message.id)
-            member = ctx.guild.get_member(713979128969429012)
-            thebot = ctx.guild.get_member(ctx.guild.me)
-            thedumbass = ctx.guild.get_member(625026392853315584)
-            reaction, user = await self.bot.wait_for('reaction_add', check=check, timeout=timeout)
-            if user == member:
-                if str(reaction.emoji) == '\U0001f44d':
-                    dankrandom_sub.upvote()
-                    await ctx.send(f'{user.mention}, I upvoted the post!')
-                elif str(reaction.emoji) == '\U0001f44e':
-                    dankrandom_sub.downvote()
-                    await ctx.send(f'{user.mention}, I downvoted the post.')
-                else:
-                    ranovarhfsbfsadjm = 0
-            elif user == thebot:
-                bruh = 193918
-            
-            elif user == thedumbass:
-                t_end = time.time() + 60 
-                while time.time() < t_end:
-                    await user.send("We are sorry, you don't have permission to use the bot anymore.")
-                    await message.remove_reaction(reaction, user)
-                    
-            else:
-                await ctx.send(f"{user.mention}, I'm sorry you cannot react as you are not the bot owner.")
-                await message.remove_reaction(reaction, user)
         
    
-                    
+  loop = asyncio.get_event_loop()
+  bot.pool = loop.run_until_complete(asyncpg.create_pool(**POSTGRES_INFO))
+                  
 
 def setup(bot):
     bot.add_cog(Moderation(bot))
-
-
-    
-
-
-
 

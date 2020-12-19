@@ -1,6 +1,6 @@
 import discord
 import re
-import traceback
+import tracecback
 from discord.ext import commands
 from discord.ext.commands import has_permissions, MissingPermissions
 from discord.utils import get
@@ -64,10 +64,12 @@ async def randomfact(ctx):
             res = await r.json()
             await ctx.send(res['text'])
 
-@bot.event
+@bot.event()
 async def on_command_error(self, ctx, error):
-    if isinstance(error, commands.MissingPermissions(missing_perms)):
-        await ctx.send(f'You are missing the permission(s): {missing_perms}')
+    if isinstance(error, commands.MissingPermissions):
+        embed = discord.Embed(color=discord.Color.red())
+        embed.set_author(name='Error Occured!')
+        embed.add_field(name='
 @bot.command()
 async def mcskin(ctx, username):
     async with aiohttp.ClientSession() as session:

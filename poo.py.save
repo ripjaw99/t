@@ -1,0 +1,17 @@
+import asyncio
+import aiohttp
+
+
+
+async def plop(r):
+    async with aiohttp.ClientSession() as session:
+        async with session.get('https://groups.roblox.com/v2/users/635117735/groups/roles') as r:
+            res = await r.json()
+            for item in res["data"]:
+                if item[
+asyncio.run(plop('r'))
+
+
+
+
+
